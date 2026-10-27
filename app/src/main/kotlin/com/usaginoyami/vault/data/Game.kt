@@ -26,4 +26,9 @@ data class Game(
     val lancamento: String? = null,
     /** ID do jogo na Steam, quando já descoberto (evita buscar de novo pelo nome). */
     val steamAppId: Int? = null,
+    /** Etiquetas livres (ex.: "platinado", "100%"), além do status principal. */
+    val tags: List<String> = emptyList(),
 )
+
+/** Jogo na lixeira, com o momento (epoch em ms) em que foi excluído. */
+class JogoExcluido(val jogo: Game, val excluidoEm: Long)

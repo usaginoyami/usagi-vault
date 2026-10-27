@@ -62,6 +62,8 @@ import com.usaginoyami.vault.data.Covers
 import com.usaginoyami.vault.data.Status
 import com.usaginoyami.vault.logic.dataBr
 import com.usaginoyami.vault.logic.partesData
+import com.usaginoyami.vault.logic.semAcento
+import com.usaginoyami.vault.logic.todasTags
 import java.io.File
 import java.net.URLEncoder
 import java.time.LocalDate
@@ -203,6 +205,31 @@ fun EdicaoScreen(vm: VaultViewModel) {
                 }
             }
 
+            Text("Etiquetas", color = VaultColors.Muted, fontSize = 12.sp)
+            if (f.tags.isNotEmpty()) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    f.tags.forEach { t ->
+                        AssistChip(onClick = { vm.removerTag(t) }, label = { Text("$t  ✕") })
+                    }
+                }
+            }
+            var tagNova by remember(f.sessao) { mutableStateOf("") }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Campo("Nova etiqueta (ex: platinado)", tagNova, Modifier.weight(1f)) { tagNova = it }
+                OutlinedButton(
+                    onClick = { vm.adicionarTag(tagNova); tagNova = "" },
+                    enabled = tagNova.isNotBlank(),
+                ) { Text("Adicionar") }
+            }
+            val sugestoes = remember(vm.jogos, f.tags) {
+                todasTags(vm.jogos).filter { s -> f.tags.none { semAcento(it) == semAcento(s) } }.take(10)
+            }
+            if (sugestoes.isNotEmpty()) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    sugestoes.forEach { t -> AssistChip(onClick = { vm.adicionarTag(t) }, label = { Text("+ $t") }) }
+                }
+            }
+
             if (f.status == Status.ZERADO) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = {
@@ -267,11 +294,11 @@ fun EdicaoScreen(vm: VaultViewModel) {
     if (confirmarExcluir) {
         AlertDialog(
             onDismissRequest = { confirmarExcluir = false },
-            title = { Text("Excluir este jogo?") },
-            text = { Text("\"${f.nome}\" será apagado da biblioteca.") },
+            title = { Text("Mandar para a lixeira?") },
+            text = { Text("\"${f.nome}\" vai para a lixeira e pode ser restaurado por 30 dias.") },
             confirmButton = {
                 TextButton(onClick = { confirmarExcluir = false; vm.excluir() }) {
-                    Text("Excluir", color = VaultColors.Drop)
+                    Text("Mandar", color = VaultColors.Drop)
                 }
             },
             dismissButton = { TextButton(onClick = { confirmarExcluir = false }) { Text("Cancelar") } },

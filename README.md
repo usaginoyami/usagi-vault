@@ -79,6 +79,14 @@ Os jogos importados da Steam pelo app já guardam o ID da Steam, então o lote n
 - **Arraste para o lado** na edição: esquerda = próximo jogo, direita = anterior (na ordem da lista que estava na tela, com filtro/busca/ordem). Também há os botões ‹ ›.
 - **ID da Steam**: campo na edição (aceita o número ou o link da loja). Se a capa/data vieram de um jogo parecido (remake, remaster), cole o ID certo e toque em **Baixar capa e data por este ID**. O ID fica salvo e o download em massa passa a usá-lo. **Ver na Steam** abre a página; sem ID, **Procurar na Steam** abre a busca pelo nome.
 
+## Etiquetas, lixeira e estatísticas (v1.4)
+
+- **Etiquetas**: além do status (zerado, sem fim...), cada jogo pode ter várias etiquetas livres (ex.: `platinado`, `100%`, `coop`). Na edição: digite e toque em Adicionar, ou use as sugestões; toque numa etiqueta para tirar. Na biblioteca há uma linha de filtro `#etiqueta`, a busca também acha etiquetas e elas aparecem no cartão.
+- **Lixeira**: excluir manda o jogo (e a capa) para a lixeira e o aviso tem **Desfazer**. Em ⋮ ▸ **Lixeira** dá para restaurar, apagar de vez ou esvaziar. O que passa de 30 dias lá é apagado sozinho.
+- **Estatísticas e meta** (⋮ ▸ *Estatísticas e meta*): meta de zerados do ano com barra de progresso e ritmo necessário por mês, sequência de meses seguidos zerando algo, zerados por ano e horas por gênero. Só conta jogos zerados que têm data.
+
+> O banco ganhou as colunas `tags` e `excluido_em`. O app do PC (`jogos_app.py`) ignora `tags`, mas **mostra os jogos da lixeira** do celular como se fossem normais, porque não conhece `excluido_em`. Esvazie a lixeira no celular antes de levar o banco para o PC.
+
 ## Detalhes
 
 - Banco: SQLite em `files/jogos.db`, mesmas colunas do PC (`zerado`, `sem_fim`, `dropado`…). Status é um só por jogo.

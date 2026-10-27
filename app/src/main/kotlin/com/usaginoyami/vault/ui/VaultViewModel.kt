@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.usaginoyami.vault.data.Backup
 import com.usaginoyami.vault.data.Covers
 import com.usaginoyami.vault.data.Game
+import com.usaginoyami.vault.data.JogoExcluido
 import com.usaginoyami.vault.data.GameDb
 import com.usaginoyami.vault.data.NovoJogo
 import com.usaginoyami.vault.data.Status
@@ -21,9 +22,12 @@ import com.usaginoyami.vault.logic.Filtro
 import com.usaginoyami.vault.logic.MassaOpcoes
 import com.usaginoyami.vault.logic.Ordem
 import com.usaginoyami.vault.logic.candidatosMassa
+import com.usaginoyami.vault.logic.DIAS_LIXEIRA
 import com.usaginoyami.vault.logic.chaveNome
 import com.usaginoyami.vault.logic.extrairAppId
 import com.usaginoyami.vault.logic.filtrar
+import com.usaginoyami.vault.logic.lerTags
+import com.usaginoyami.vault.logic.semAcento
 import com.usaginoyami.vault.logic.fmt
 import com.usaginoyami.vault.logic.lancamentoBr
 import com.usaginoyami.vault.logic.normalizarLancamento
@@ -54,6 +58,8 @@ sealed interface Tela {
     data class Edicao(val id: Long?) : Tela
     data object Steam : Tela
     data object Massa : Tela
+    data object Lixeira : Tela
+    data object Estatisticas : Tela
 }
 
 /** Campos da tela de edição, como texto (do jeito que o usuário digita). */
@@ -74,6 +80,7 @@ data class Form(
     val lancamento: String = "",
     /** ID da Steam como digitado (número ou link da loja). */
     val steamAppId: String = "",
+    val tags: List<String> = emptyList(),
     /** Últimos valores válidos já gravados: valem enquanto o texto digitado estiver inválido. */
     val lancamentoGuardado: String? = null,
     val steamIdGuardado: Int? = null,
@@ -101,6 +108,7 @@ data class Form(
         capa = capaExibida,
         lancamento = if (lancamento.isBlank()) null else (normalizarLancamento(lancamento) ?: lancamentoGuardado),
         steamAppId = if (steamAppId.isBlank()) null else (extrairAppId(steamAppId) ?: steamIdGuardado),
+        tags = tags,
     )
 
     companion object {
@@ -117,6 +125,7 @@ data class Form(
             obs = g.obs.orEmpty(),
             lancamento = lancamentoBr(g.lancamento),
             steamAppId = g.steamAppId?.toString().orEmpty(),
+            tags = g.tags,
             lancamentoGuardado = g.lancamento,
             steamIdGuardado = g.steamAppId,
             capaAtual = g.capa,
@@ -139,6 +148,13 @@ class VaultViewModel(app: Application) : AndroidViewModel(app) {
     var busca by mutableStateOf("")
     var filtro by mutableStateOf(Filtro.TODOS)
     var ordem by mutableStateOf(Ordem.NOME)
+    var tagFiltro by mutableStateOf<String?>(null)
+
+    var lixeira by mutableStateOf<List<JogoExcluido>>(emptyList()); private set
+    /** Último jogo mandado para a lixeira: enquanto não for null, o aviso oferece "Desfazer". */
+    var ultimoExcluido by mutableStateOf<Long?>(null); private set
+    /** Meta de jogos zerados por ano (0 = sem meta). */
+    var metaAnual by mutableStateOf(prefs.getInt("meta_anual", 0)); private set
 
     var mensagem by mutableStateOf<String?>(null); private set
     var ocupado by mutableStateOf<String?>(null); private set
@@ -174,7 +190,11 @@ class VaultViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { Covers.limparOrfas(ctx, banco.capasEmUso()) }
+            withContext(Dispatchers.IO) {
+                // o que está na lixeira há mais de 30 dias some de vez
+                banco.esvaziarLixeira(System.currentTimeMillis() - DIAS_LIXEIRA * 24L * 3600_000L)
+                Covers.limparOrfas(ctx, banco.capasEmUso())
+            }
             recarregar()
         }
     }
@@ -184,7 +204,10 @@ class VaultViewModel(app: Application) : AndroidViewModel(app) {
         carregado = true
     }
 
-    fun limparMensagem() { mensagem = null }
+    fun limparMensagem() {
+        mensagem = null
+        ultimoExcluido = null
+    }
 
     fun alternarMenu() {
         menuOculto = !menuOculto
@@ -204,7 +227,7 @@ class VaultViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun editar(g: Game) {
-        navIds = filtrar(jogos, filtro, busca, ordem).map { it.id }
+        navIds = filtrar(jogos, filtro, busca, ordem, tagFiltro).map { it.id }
         form = novaSessao(Form.de(g))
         salvamento = ""
         alterado = false
@@ -466,17 +489,76 @@ class VaultViewModel(app: Application) : AndroidViewModel(app) {
             withContext(NonCancellable) {
                 salvarMutex.withLock {
                     withContext(Dispatchers.IO) {
-                        banco.excluir(id)
-                        Covers.apagar(ctx, f.capaAtual)
-                        Covers.apagar(ctx, f.capaNova)
+                        // capa nova ainda não gravada no jogo: apaga; a capa atual fica com o jogo na lixeira
+                        if (f.capaNova != null) Covers.apagar(ctx, f.capaNova)
+                        banco.paraLixeira(id, System.currentTimeMillis())
                     }
                 }
             }
             tela = Tela.Biblioteca
             recarregar()
-            mensagem = "Jogo excluído."
+            ultimoExcluido = id // lido (e limpo) quando o aviso aparece, para oferecer "Desfazer"
+            mensagem = "Jogo enviado para a lixeira."
         }
     }
+
+    // ---------- lixeira ----------
+
+    fun abrirLixeira() {
+        viewModelScope.launch {
+            lixeira = withContext(Dispatchers.IO) { banco.lixeira() }
+            tela = Tela.Lixeira
+        }
+    }
+
+    fun restaurar(id: Long) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { banco.restaurar(id) }
+            recarregar()
+            lixeira = withContext(Dispatchers.IO) { banco.lixeira() }
+            mensagem = "Jogo restaurado."
+        }
+    }
+
+    fun apagarDeVez(id: Long) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                banco.apagarDaLixeira(id)
+                Covers.limparOrfas(ctx, banco.capasEmUso())
+            }
+            lixeira = withContext(Dispatchers.IO) { banco.lixeira() }
+        }
+    }
+
+    fun esvaziarLixeira() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                banco.esvaziarLixeira()
+                Covers.limparOrfas(ctx, banco.capasEmUso())
+            }
+            lixeira = emptyList()
+            mensagem = "Lixeira esvaziada."
+        }
+    }
+
+    // ---------- estatísticas ----------
+
+    fun abrirEstatisticas() { tela = Tela.Estatisticas }
+
+    fun definirMeta(n: Int) {
+        metaAnual = n.coerceIn(0, 9999)
+        prefs.edit().putInt("meta_anual", metaAnual).apply()
+    }
+
+    // ---------- etiquetas ----------
+
+    fun adicionarTag(texto: String) {
+        val nova = lerTags(texto).firstOrNull() ?: return
+        if (form.tags.any { semAcento(it) == semAcento(nova) }) return
+        alterar { copy(tags = tags + nova) }
+    }
+
+    fun removerTag(tag: String) = alterar { copy(tags = tags - tag) }
 
     // ---------- backup ----------
 

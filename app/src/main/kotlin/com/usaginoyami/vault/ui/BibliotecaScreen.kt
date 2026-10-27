@@ -33,6 +33,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,16 +62,20 @@ import com.usaginoyami.vault.logic.anoDe
 import com.usaginoyami.vault.logic.estatisticas
 import com.usaginoyami.vault.logic.filtrar
 import com.usaginoyami.vault.logic.fmt
+import com.usaginoyami.vault.logic.todasTags
 import java.io.File
 
 @Composable
 fun BibliotecaScreen(vm: VaultViewModel, onExportar: () -> Unit, onImportar: () -> Unit) {
     val ctx = LocalContext.current
     val capasDir = remember { Covers.dir(ctx) }
-    val visiveis = remember(vm.jogos, vm.filtro, vm.busca, vm.ordem) {
-        filtrar(vm.jogos, vm.filtro, vm.busca, vm.ordem)
+    val visiveis = remember(vm.jogos, vm.filtro, vm.busca, vm.ordem, vm.tagFiltro) {
+        filtrar(vm.jogos, vm.filtro, vm.busca, vm.ordem, vm.tagFiltro)
     }
     val stats = remember(vm.jogos) { estatisticas(vm.jogos) }
+    val tags = remember(vm.jogos) { todasTags(vm.jogos) }
+    // se a etiqueta filtrada deixou de existir (jogo editado/excluído), volta para "todas"
+    LaunchedEffect(tags) { if (vm.tagFiltro != null && tags.none { it.equals(vm.tagFiltro, true) }) vm.tagFiltro = null }
     var menu by remember { mutableStateOf(false) }
     var menuOrdem by remember { mutableStateOf(false) }
 
@@ -108,6 +113,14 @@ fun BibliotecaScreen(vm: VaultViewModel, onExportar: () -> Unit, onImportar: () 
                         DropdownMenuItem(
                             text = { Text("Baixar capas em massa") },
                             onClick = { menu = false; vm.abrirMassa() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Estatísticas e meta") },
+                            onClick = { menu = false; vm.abrirEstatisticas() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Lixeira") },
+                            onClick = { menu = false; vm.abrirLixeira() },
                         )
                         DropdownMenuItem(
                             text = { Text("Exportar backup (.zip)") },
@@ -170,6 +183,25 @@ fun BibliotecaScreen(vm: VaultViewModel, onExportar: () -> Unit, onImportar: () 
                             selectedLabelColor = Color.White,
                         ),
                     )
+                }
+            }
+
+            if (tags.isNotEmpty()) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(tags) { t ->
+                        FilterChip(
+                            selected = vm.tagFiltro.equals(t, ignoreCase = true),
+                            onClick = { vm.tagFiltro = if (vm.tagFiltro.equals(t, ignoreCase = true)) null else t },
+                            label = { Text("#$t") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = VaultColors.Red,
+                                selectedLabelColor = Color.White,
+                            ),
+                        )
+                    }
                 }
             }
 
@@ -290,6 +322,12 @@ private fun JogoCard(g: Game, capasDir: File, onClick: () -> Unit) {
             val sub = listOfNotNull(g.plataforma ?: "—", anoDe(g.lancamento), g.nota?.let { "★ ${fmt(it)}" })
                 .joinToString(" · ")
             Text(sub, fontSize = 11.sp, color = VaultColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (g.tags.isNotEmpty()) {
+                Text(
+                    g.tags.joinToString(" ") { "#$it" },
+                    fontSize = 10.sp, color = VaultColors.RedBright, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

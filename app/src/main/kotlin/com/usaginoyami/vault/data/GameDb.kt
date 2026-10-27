@@ -40,13 +40,56 @@ class GameDb(val arquivo: File) {
         if ("dropado" !in colunas) d.execSQL("ALTER TABLE jogos ADD COLUMN dropado INTEGER DEFAULT 0")
         if ("lancamento" !in colunas) d.execSQL("ALTER TABLE jogos ADD COLUMN lancamento TEXT")
         if ("steam_appid" !in colunas) d.execSQL("ALTER TABLE jogos ADD COLUMN steam_appid INTEGER")
+        if ("tags" !in colunas) d.execSQL("ALTER TABLE jogos ADD COLUMN tags TEXT")
+        if ("excluido_em" !in colunas) d.execSQL("ALTER TABLE jogos ADD COLUMN excluido_em INTEGER")
     }
 
     @Synchronized
     fun todos(): List<Game> =
-        db.rawQuery("SELECT * FROM jogos", null).use { c ->
+        db.rawQuery("SELECT * FROM jogos WHERE excluido_em IS NULL", null).use { c ->
             buildList { while (c.moveToNext()) add(c.paraJogo()) }
         }
+
+    /** Jogos na lixeira, do excluído mais recentemente para o mais antigo. */
+    @Synchronized
+    fun lixeira(): List<JogoExcluido> =
+        db.rawQuery("SELECT * FROM jogos WHERE excluido_em IS NOT NULL ORDER BY excluido_em DESC", null).use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    add(JogoExcluido(c.paraJogo(), c.getLong(c.getColumnIndexOrThrow("excluido_em"))))
+                }
+            }
+        }
+
+    /** Manda para a lixeira (o jogo e a capa continuam guardados). */
+    @Synchronized
+    fun paraLixeira(id: Long, agora: Long) {
+        val v = ContentValues().apply { put("excluido_em", agora) }
+        db.update("jogos", v, "id=?", arrayOf(id.toString()))
+    }
+
+    /** Apaga de vez um jogo da lixeira. */
+    @Synchronized
+    fun apagarDaLixeira(id: Long) {
+        db.delete("jogos", "id=? AND excluido_em IS NOT NULL", arrayOf(id.toString()))
+    }
+
+    @Synchronized
+    fun restaurar(id: Long) {
+        val v = ContentValues().apply { putNull("excluido_em") }
+        db.update("jogos", v, "id=?", arrayOf(id.toString()))
+    }
+
+    /** Apaga de vez o que está na lixeira desde antes de [limite]. Devolve as capas para o chamador apagar os arquivos. */
+    @Synchronized
+    fun esvaziarLixeira(limite: Long = Long.MAX_VALUE): List<String> {
+        val capas = db.rawQuery(
+            "SELECT capa FROM jogos WHERE excluido_em IS NOT NULL AND excluido_em < ? AND capa IS NOT NULL",
+            arrayOf(limite.toString()),
+        ).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
+        db.delete("jogos", "excluido_em IS NOT NULL AND excluido_em < ?", arrayOf(limite.toString()))
+        return capas
+    }
 
     /** Insere (id = 0) ou atualiza. Devolve o id. */
     @Synchronized
@@ -151,6 +194,7 @@ class GameDb(val arquivo: File) {
         putTexto("capa", g.capa)
         putTexto("lancamento", g.lancamento)
         if (g.steamAppId != null) put("steam_appid", g.steamAppId) else putNull("steam_appid")
+        putTexto("tags", com.usaginoyami.vault.logic.juntarTags(g.tags))
     }
 
     private fun ContentValues.putTexto(chave: String, valor: String?) {
@@ -184,6 +228,7 @@ class GameDb(val arquivo: File) {
             capa = texto("capa"),
             lancamento = texto("lancamento"),
             steamAppId = inteiroNulo("steam_appid"),
+            tags = com.usaginoyami.vault.logic.lerTags(texto("tags")),
         )
     }
 

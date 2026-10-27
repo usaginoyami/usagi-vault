@@ -3,6 +3,8 @@ package com.usaginoyami.vault.logic
 import com.usaginoyami.vault.data.Game
 import com.usaginoyami.vault.data.Status
 import java.text.Collator
+import java.time.LocalDate
+import java.time.YearMonth
 import java.text.Normalizer
 import java.util.Locale
 
@@ -44,7 +46,7 @@ fun chaveNome(s: String): String = semAcento(s).filter { it.isLetterOrDigit() }
 
 private val collator: Collator = Collator.getInstance(Locale.forLanguageTag("pt-BR"))
 
-fun filtrar(jogos: List<Game>, filtro: Filtro, busca: String, ordem: Ordem): List<Game> {
+fun filtrar(jogos: List<Game>, filtro: Filtro, busca: String, ordem: Ordem, tag: String? = null): List<Game> {
     val q = semAcento(busca.trim())
     val base = jogos.filter { j ->
         val okFiltro = when (filtro) {
@@ -54,8 +56,8 @@ fun filtrar(jogos: List<Game>, filtro: Filtro, busca: String, ordem: Ordem): Lis
             Filtro.SEM_FIM -> j.status == Status.SEM_FIM
             Filtro.DROPADOS -> j.status == Status.DROPADO
         }
-        okFiltro && (q.isEmpty() ||
-            semAcento("${j.nome} ${j.plataforma.orEmpty()} ${j.genero.orEmpty()}").contains(q))
+        okFiltro && (tag == null || j.tags.any { it.equals(tag, ignoreCase = true) }) && (q.isEmpty() ||
+            semAcento("${j.nome} ${j.plataforma.orEmpty()} ${j.genero.orEmpty()} ${j.tags.joinToString(" ")}").contains(q))
     }
     val porNome = Comparator<Game> { a, b -> collator.compare(a.nome, b.nome) }
     return when (ordem) {
@@ -226,3 +228,71 @@ fun extrairAppId(texto: String): Int? {
     val numero = doLink ?: t.takeIf { it.isNotEmpty() && it.length <= 9 && it.all(Char::isDigit) }
     return numero?.toIntOrNull()?.takeIf { it > 0 }
 }
+
+// ---------- etiquetas ----------
+
+/** "Platinado , 100%" -> ["Platinado", "100%"] (sem repetir, sem vazios, máx. 40 letras cada). */
+fun lerTags(texto: String?): List<String> =
+    (texto ?: "").split(',', ';', '\n').map { it.trim().take(40) }.filter { it.isNotEmpty() }
+        .distinctBy { semAcento(it) }
+
+fun juntarTags(tags: List<String>): String? =
+    tags.map { it.replace(',', ' ').trim() }.filter { it.isNotEmpty() }.distinctBy { semAcento(it) }
+        .joinToString(",").ifEmpty { null }
+
+/** Todas as etiquetas usadas, da mais comum para a menos, cada uma uma vez (com a grafia mais usada). */
+fun todasTags(jogos: List<Game>): List<String> =
+    jogos.flatMap { it.tags }.groupBy { semAcento(it) }
+        .values.sortedWith(compareByDescending<List<String>> { it.size }.thenBy { semAcento(it.first()) })
+        .map { grupo -> grupo.groupingBy { it }.eachCount().maxByOrNull { it.value }!!.key }
+
+// ---------- estatísticas e metas ----------
+
+/** Zerados por ano da data em que zerou, do ano mais recente para o mais antigo. */
+fun zeradosPorAno(jogos: List<Game>): List<Pair<Int, Int>> =
+    jogos.filter { it.status == Status.ZERADO }
+        .mapNotNull { it.dataZerou?.take(4)?.toIntOrNull() }
+        .groupingBy { it }.eachCount()
+        .toList().sortedByDescending { it.first }
+
+/** Horas somadas por gênero (maiores primeiro). Jogos sem gênero ou sem horas ficam de fora. */
+fun horasPorGenero(jogos: List<Game>, limite: Int = 8): List<Pair<String, Double>> =
+    jogos.filter { !it.genero.isNullOrBlank() && (it.horas ?: 0.0) > 0.0 }
+        .groupBy { semAcento(it.genero!!.trim()) }
+        .map { (_, g) -> g.first().genero!!.trim() to g.sumOf { it.horas ?: 0.0 } }
+        .sortedByDescending { it.second }.take(limite)
+
+/**
+ * Meses seguidos com pelo menos um jogo zerado: (atual, melhor).
+ * A sequência atual continua viva se o mês passado teve zerada, mesmo que este ainda não tenha.
+ */
+fun sequenciaMeses(jogos: List<Game>, hoje: LocalDate): Pair<Int, Int> {
+    val meses = jogos.filter { it.status == Status.ZERADO }.mapNotNull { j ->
+        val p = j.dataZerou?.split("-")?.mapNotNull { it.toIntOrNull() }
+        if (p != null && p.size >= 2 && p[1] in 1..12) YearMonth.of(p[0], p[1]) else null
+    }.toSortedSet()
+    if (meses.isEmpty()) return 0 to 0
+    var melhor = 0
+    var corrida = 0
+    var anterior: YearMonth? = null
+    for (m in meses) {
+        corrida = if (anterior != null && anterior.plusMonths(1) == m) corrida + 1 else 1
+        melhor = maxOf(melhor, corrida)
+        anterior = m
+    }
+    val agora = YearMonth.from(hoje)
+    var atual = 0
+    var m = if (agora in meses) agora else agora.minusMonths(1)
+    while (m in meses) {
+        atual++
+        m = m.minusMonths(1)
+    }
+    return atual to melhor
+}
+
+/** Quantos jogos foram zerados no [ano]. */
+fun zeradosNoAno(jogos: List<Game>, ano: Int): Int =
+    jogos.count { it.status == Status.ZERADO && it.dataZerou?.take(4)?.toIntOrNull() == ano }
+
+/** Dias que um jogo fica na lixeira antes de ser apagado de vez. */
+const val DIAS_LIXEIRA = 30
