@@ -16,7 +16,16 @@ jobs:
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
       - name: Build debug APK
-        run: ./gradlew --no-daemon assembleDebug
+        run: |
+          set +e
+          ./gradlew --no-daemon assembleDebug 2>&1 | tee build.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" != "0" ]; then
+            # resume os erros como anotação (legível sem baixar o log)
+            msg=$(grep -E "^e: |What went wrong|Execution failed|error:|> " build.log | head -40 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Build falhou::$msg"
+          fi
+          exit $code
       - uses: actions/upload-artifact@v4
         with:
           name: usagi-vault-debug-apk
