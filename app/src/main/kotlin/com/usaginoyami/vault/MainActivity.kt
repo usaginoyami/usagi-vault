@@ -32,6 +32,8 @@ import androidx.compose.ui.Modifier
 import com.usaginoyami.vault.ui.BibliotecaScreen
 import com.usaginoyami.vault.ui.CamadaOcupado
 import com.usaginoyami.vault.ui.EdicaoScreen
+import com.usaginoyami.vault.ui.EstatisticasScreen
+import com.usaginoyami.vault.ui.LixeiraScreen
 import com.usaginoyami.vault.ui.MassaScreen
 import com.usaginoyami.vault.ui.SteamScreen
 import com.usaginoyami.vault.ui.Tela
