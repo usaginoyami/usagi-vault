@@ -155,6 +155,30 @@ class GameDb(val arquivo: File) {
         return antiga
     }
 
+    /**
+     * Grava o que veio do IGDB (capa, data, gênero); só mexe no que não for null, e o gênero só se estiver vazio.
+     * Devolve o nome da capa antiga quando ela foi trocada, para o chamador apagar o arquivo.
+     */
+    @Synchronized
+    fun atualizarConsole(id: Long, capa: String?, lancamento: String?, genero: String?): String? {
+        val antiga = if (capa == null) null else
+            db.rawQuery("SELECT capa FROM jogos WHERE id=?", arrayOf(id.toString())).use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        val v = ContentValues().apply {
+            if (capa != null) put("capa", capa)
+            if (lancamento != null) put("lancamento", lancamento)
+        }
+        if (v.size() > 0) db.update("jogos", v, "id=?", arrayOf(id.toString()))
+        if (genero != null) {
+            db.execSQL(
+                "UPDATE jogos SET genero=? WHERE id=? AND (genero IS NULL OR TRIM(genero)='')",
+                arrayOf<Any>(genero, id),
+            )
+        }
+        return antiga
+    }
+
     @Synchronized
     fun capasEmUso(): Set<String> =
         db.rawQuery("SELECT capa FROM jogos WHERE capa IS NOT NULL", null).use { c ->

@@ -15,7 +15,9 @@ import com.usaginoyami.vault.data.JogoExcluido
 import com.usaginoyami.vault.data.GameDb
 import com.usaginoyami.vault.data.NovoJogo
 import com.usaginoyami.vault.data.Status
-import com.usaginoyami.vault.data.LimiteSteam
+import com.usaginoyami.vault.data.ErroChaveIgdb
+import com.usaginoyami.vault.data.Igdb
+import com.usaginoyami.vault.data.LimiteApi
 import com.usaginoyami.vault.data.Steam
 import com.usaginoyami.vault.data.SteamGame
 import com.usaginoyami.vault.logic.Filtro
@@ -24,6 +26,12 @@ import com.usaginoyami.vault.logic.Ordem
 import com.usaginoyami.vault.logic.candidatosMassa
 import com.usaginoyami.vault.logic.DIAS_LIXEIRA
 import com.usaginoyami.vault.logic.chaveNome
+import com.usaginoyami.vault.logic.dataDaPlataforma
+import com.usaginoyami.vault.logic.ehPlataformaPc
+import com.usaginoyami.vault.logic.escolherIgdb
+import com.usaginoyami.vault.logic.generoPt
+import com.usaginoyami.vault.logic.plataformaIgdb
+import com.usaginoyami.vault.logic.precisaGenero
 import com.usaginoyami.vault.logic.extrairAppId
 import com.usaginoyami.vault.logic.filtrar
 import com.usaginoyami.vault.logic.lerTags
@@ -173,6 +181,8 @@ class VaultViewModel(app: Application) : AndroidViewModel(app) {
 
     var steamChave by mutableStateOf(prefs.getString("steam_chave", "").orEmpty())
     var steamPerfil by mutableStateOf(prefs.getString("steam_perfil", "").orEmpty())
+    var igdbId by mutableStateOf(prefs.getString("igdb_id", "").orEmpty()); private set
+    var igdbSecret by mutableStateOf(prefs.getString("igdb_secret", "").orEmpty()); private set
     var steamFiltro by mutableStateOf("")
     var steamStatus by mutableStateOf(""); private set
     var steamBuscando by mutableStateOf(false); private set
@@ -447,6 +457,53 @@ class VaultViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Procura o jogo de console no IGDB pelo nome e plataforma: capa de caixa, data e gênero (se vazio). */
+    fun buscarNoIgdb() {
+        val nome = form.nome.trim()
+        if (nome.isEmpty()) {
+            mensagem = "Digite o nome do jogo primeiro."
+            return
+        }
+        if (!igdbConfigurado) {
+            mensagem = "Preencha o Client ID e o Secret do IGDB em ⋮ ▸ Baixar capas em massa."
+            return
+        }
+        val sessao = form.sessao
+        val plataforma = plataformaIgdb(form.plataforma)
+        form = form.copy(buscandoCapa = true)
+        viewModelScope.launch {
+            class Achado(val nome: String, val capa: String?, val data: String?, val genero: String?)
+            val r = runCatching {
+                withContext(Dispatchers.IO) {
+                    val c = escolherIgdb(nome, plataforma, Igdb.buscar(igdbId, igdbSecret, nome), estrito = false)
+                        ?: return@withContext null
+                    val arquivo = c.imageId?.let { Igdb.capa(ctx, it) }
+                    Achado(c.nome, arquivo, dataDaPlataforma(c, plataforma), generoPt(c.generos))
+                }
+            }
+            if (form.sessao != sessao) {
+                r.getOrNull()?.capa?.let { Covers.apagar(ctx, it) }
+                return@launch
+            }
+            r.onSuccess { a ->
+                if (a == null) {
+                    mensagem = "Não achei esse jogo no IGDB" + if (plataforma != null) " para essa plataforma." else "."
+                } else {
+                    if (a.capa != null) form.capaNova?.let { Covers.apagar(ctx, it) }
+                    form = form.copy(
+                        capaNova = a.capa ?: form.capaNova,
+                        removerCapa = if (a.capa != null) false else form.removerCapa,
+                        lancamento = if (a.data != null && form.lancamento.isBlank()) lancamentoBr(a.data) else form.lancamento,
+                        genero = if (a.genero != null && form.genero.isBlank()) a.genero else form.genero,
+                    )
+                    agendarSalvar(150)
+                    mensagem = "Dados de: ${a.nome}" + if (a.capa == null) " (sem capa no IGDB)" else ""
+                }
+            }.onFailure { mensagem = it.message ?: "Erro ao buscar no IGDB." }
+            form = form.copy(buscandoCapa = false)
+        }
+    }
+
     /** Baixa capa e data de lançamento do ID da Steam digitado (substitui as atuais). */
     fun buscarPeloId() {
         val appid = extrairAppId(form.steamAppId)
@@ -667,10 +724,36 @@ class VaultViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- capas (e datas) em massa ----------
 
-    private class ResultadoMassa(val capa: Boolean, val data: Boolean)
+    private class ResultadoMassa(val capa: Boolean, val data: Boolean, val genero: Boolean = false)
 
-    /** Trabalha num jogo; null = não achei na Steam (ou a Steam não tem capa/data). Bloqueante. */
+    fun mudarIgdbId(v: String) {
+        igdbId = v
+        prefs.edit().putString("igdb_id", v.trim()).apply()
+    }
+
+    fun mudarIgdbSecret(v: String) {
+        igdbSecret = v
+        prefs.edit().putString("igdb_secret", v.trim()).apply()
+    }
+
+    val igdbConfigurado: Boolean get() = igdbId.isNotBlank() && igdbSecret.isNotBlank()
+
+    /** Jogo de console: IGDB, só entra o que saiu naquela plataforma. null = não achei. Bloqueante. */
+    private fun processarConsole(g: Game, o: MassaOpcoes): ResultadoMassa? {
+        val plataforma = plataformaIgdb(g.plataforma)
+        val c = escolherIgdb(g.nome, plataforma, Igdb.buscar(igdbId, igdbSecret, g.nome), estrito = true) ?: return null
+        val capa = if (precisaCapa(g, o) && c.imageId != null) Igdb.capa(ctx, c.imageId) else null
+        val data = if (precisaLancamento(g, o)) dataDaPlataforma(c, plataforma) else null
+        val genero = if (precisaGenero(g, o)) generoPt(c.generos) else null
+        if (capa == null && data == null && genero == null) return null
+        val antiga = banco.atualizarConsole(g.id, capa, data, genero)
+        if (capa != null && antiga != null && antiga != capa) Covers.apagar(ctx, antiga)
+        return ResultadoMassa(capa != null, data != null, genero != null)
+    }
+
+    /** Trabalha num jogo; null = não achei na Steam/IGDB (ou não têm capa/data). Bloqueante. */
     private fun processarMassa(g: Game, o: MassaOpcoes): ResultadoMassa? {
+        if (!ehPlataformaPc(g.plataforma)) return processarConsole(g, o)
         val appid = g.steamAppId ?: Steam.buscarPorNome(g.nome, estrito = true)?.appid ?: return null
         val capa = if (precisaCapa(g, o)) Steam.capa(ctx, appid) else null
         val data = if (precisaLancamento(g, o)) Steam.lancamento(appid) else null
@@ -684,7 +767,11 @@ class VaultViewModel(app: Application) : AndroidViewModel(app) {
         if (massaRodando) return
         val o = massaOpcoes
         val lista = candidatosMassa(jogos, o)
-        if (lista.isEmpty() || !(o.capas || o.lancamento)) return
+        if (lista.isEmpty() || !(o.capas || o.lancamento || o.genero)) return
+        if (lista.any { !ehPlataformaPc(it.plataforma) } && !igdbConfigurado) {
+            mensagem = "Para jogos de console, preencha o Client ID e o Secret do IGDB."
+            return
+        }
         massaRodando = true
         massaResumo = null
         massaNaoAchados = emptyList()
@@ -692,6 +779,7 @@ class VaultViewModel(app: Application) : AndroidViewModel(app) {
         massaJob = viewModelScope.launch {
             var capas = 0
             var datas = 0
+            var generos = 0
             var falhas = 0
             var seguidas = 0
             var motivoParada: String? = null
@@ -710,14 +798,18 @@ class VaultViewModel(app: Application) : AndroidViewModel(app) {
                             if (r == null) naoAchados += g.nome else {
                                 if (r.capa) capas++
                                 if (r.data) datas++
+                                if (r.genero) generos++
                             }
                             break
-                        } catch (e: LimiteSteam) {
+                        } catch (e: ErroChaveIgdb) {
+                            motivoParada = e.message
+                            break
+                        } catch (e: LimiteApi) {
                             if (tentativas++ >= 1) {
                                 motivoParada = e.message
                                 break
                             }
-                            massaProgresso = "A Steam pediu para esperar. Retomando em 1 minuto..."
+                            massaProgresso = "O serviço pediu para esperar. Retomando em 1 minuto..."
                             delay(60_000)
                         } catch (e: CancellationException) {
                             throw e
@@ -740,6 +832,7 @@ class VaultViewModel(app: Application) : AndroidViewModel(app) {
                 val partes = ArrayList<String>()
                 partes += "$capas capas baixadas"
                 if (o.lancamento) partes += "$datas datas de lançamento"
+                if (generos > 0) partes += "$generos gêneros"
                 if (naoAchados.isNotEmpty()) partes += "${naoAchados.size} não encontrados"
                 if (falhas > 0) partes += "$falhas com erro"
                 massaResumo = (if (terminou) "Concluído: " else if (motivoParada != null) "Parou (${motivoParada}): " else "Parado: ") +

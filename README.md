@@ -87,6 +87,14 @@ Os jogos importados da Steam pelo app já guardam o ID da Steam, então o lote n
 
 > O banco ganhou as colunas `tags` e `excluido_em`. O app do PC (`jogos_app.py`) ignora `tags`, mas **mostra os jogos da lixeira** do celular como se fossem normais, porque não conhece `excluido_em`. Esvazie a lixeira no celular antes de levar o banco para o PC.
 
+## Jogos de console (v1.5)
+
+Jogos de PS1, PS2, GBA e outros consoles agora usam o **IGDB** (capa de caixa, data de lançamento **na plataforma do jogo** e gênero), em vez da Steam. Só entram resultados que saíram na plataforma marcada, então "Resident Evil 4" de PS2 não vira o remake de 2023.
+
+- **Chaves grátis**: crie um aplicativo em dev.twitch.tv/console (conta Twitch com verificação em 2 etapas; URL de redirecionamento `http://localhost`, categoria *Application Integration*, tipo *Confidential*) e cole o **Client ID** e o **Client Secret** em ⋮ ▸ *Baixar capas em massa* (marque "Incluir jogos de console"). Ficam só no celular.
+- **Em massa**: console entra no lote com a mesma busca estrita de nome; também preenche o **gênero** de quem está sem (traduzido: RPG, Tiro, Corrida...).
+- **Por jogo**: na edição de um jogo de console aparece **Buscar no IGDB (console)**. Plataformas reconhecidas: PS1/PS2/PS3/PS4/PS5, PSP, Vita, Switch, Wii, Wii U, GameCube, N64, SNES, NES, Game Boy/Color/Advance, DS, 3DS, Xbox (todas), Mega Drive, Dreamcast, Saturn. Plataforma que o app não conhece é buscada só pelo nome exato.
+
 ## Detalhes
 
 - Banco: SQLite em `files/jogos.db`, mesmas colunas do PC (`zerado`, `sem_fim`, `dropado`…). Status é um só por jogo.

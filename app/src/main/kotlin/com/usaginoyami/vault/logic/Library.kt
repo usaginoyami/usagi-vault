@@ -205,18 +205,27 @@ data class MassaOpcoes(
     val substituir: Boolean = false,
     val lancamento: Boolean = true,
     val consoles: Boolean = false,
+    /** Preenche o gênero de jogos de console que estão sem (vem do IGDB). */
+    val genero: Boolean = true,
 )
 
 fun precisaCapa(g: Game, o: MassaOpcoes): Boolean = o.capas && (g.capa == null || o.substituir)
 
 fun precisaLancamento(g: Game, o: MassaOpcoes): Boolean = o.lancamento && g.lancamento == null
 
-fun candidatosMassa(jogos: List<Game>, o: MassaOpcoes): List<Game> =
-    jogos.filter { (o.consoles || ehPlataformaPc(it.plataforma)) && (precisaCapa(it, o) || precisaLancamento(it, o)) }
+fun precisaGenero(g: Game, o: MassaOpcoes): Boolean =
+    o.genero && !ehPlataformaPc(g.plataforma) && g.genero.isNullOrBlank()
 
-/** Chamadas à loja da Steam que o lote vai fazer (cada uma espera ~1,5 s para não tomar bloqueio). */
+fun candidatosMassa(jogos: List<Game>, o: MassaOpcoes): List<Game> =
+    jogos.filter {
+        (o.consoles || ehPlataformaPc(it.plataforma)) &&
+            (precisaCapa(it, o) || precisaLancamento(it, o) || precisaGenero(it, o))
+    }
+
+/** Chamadas à loja da Steam que o lote vai fazer (cada uma espera ~1,5 s). Jogo de console usa o IGDB, não conta. */
 fun chamadasLoja(lista: List<Game>, o: MassaOpcoes): Int =
-    lista.sumOf { (if (it.steamAppId == null) 1 else 0) + (if (precisaLancamento(it, o)) 1 else 0) }
+    lista.filter { ehPlataformaPc(it.plataforma) }
+        .sumOf { (if (it.steamAppId == null) 1 else 0) + (if (precisaLancamento(it, o)) 1 else 0) }
 
 /**
  * Entende o ID da Steam como o usuário cola: "1245620", ou o link da loja
@@ -296,3 +305,77 @@ fun zeradosNoAno(jogos: List<Game>, ano: Int): Int =
 
 /** Dias que um jogo fica na lixeira antes de ser apagado de vez. */
 const val DIAS_LIXEIRA = 30
+
+// ---------- consoles (IGDB) ----------
+
+/** Um jogo como o IGDB devolve: plataformas, data por plataforma (segundos desde 1970) e gêneros em inglês. */
+class CandIgdb(
+    val id: Long,
+    val nome: String,
+    val imageId: String?,
+    val plataformas: Set<String>,
+    val datas: Map<String, Long>,
+    val primeira: Long?,
+    val generos: List<String>,
+)
+
+private val PLATAFORMAS_IGDB: Map<String, String> = mapOf(
+    "ps1" to "PlayStation", "psx" to "PlayStation", "psone" to "PlayStation", "playstation" to "PlayStation",
+    "playstation1" to "PlayStation", "ps2" to "PlayStation 2", "playstation2" to "PlayStation 2",
+    "ps3" to "PlayStation 3", "playstation3" to "PlayStation 3", "ps4" to "PlayStation 4",
+    "playstation4" to "PlayStation 4", "ps5" to "PlayStation 5", "playstation5" to "PlayStation 5",
+    "psp" to "PlayStation Portable", "playstationportable" to "PlayStation Portable",
+    "psvita" to "PlayStation Vita", "vita" to "PlayStation Vita",
+    "switch" to "Nintendo Switch", "nintendoswitch" to "Nintendo Switch", "wii" to "Wii", "wiiu" to "Wii U",
+    "gamecube" to "Nintendo GameCube", "gc" to "Nintendo GameCube", "ngc" to "Nintendo GameCube",
+    "n64" to "Nintendo 64", "nintendo64" to "Nintendo 64",
+    "snes" to "Super Nintendo Entertainment System", "supernintendo" to "Super Nintendo Entertainment System",
+    "superfamicom" to "Super Nintendo Entertainment System",
+    "nes" to "Nintendo Entertainment System", "nintendo" to "Nintendo Entertainment System",
+    "gameboy" to "Game Boy", "gb" to "Game Boy", "gbc" to "Game Boy Color", "gameboycolor" to "Game Boy Color",
+    "gba" to "Game Boy Advance", "gameboyadvance" to "Game Boy Advance",
+    "ds" to "Nintendo DS", "nintendods" to "Nintendo DS", "3ds" to "Nintendo 3DS", "nintendo3ds" to "Nintendo 3DS",
+    "xbox" to "Xbox", "xboxclassic" to "Xbox", "xbox360" to "Xbox 360", "x360" to "Xbox 360",
+    "xboxone" to "Xbox One", "xone" to "Xbox One",
+    "xboxseries" to "Xbox Series X|S", "xboxseriesx" to "Xbox Series X|S", "xboxseriess" to "Xbox Series X|S",
+    "xboxseriesxs" to "Xbox Series X|S",
+    "megadrive" to "Sega Mega Drive/Genesis", "genesis" to "Sega Mega Drive/Genesis",
+    "segagenesis" to "Sega Mega Drive/Genesis", "dreamcast" to "Dreamcast", "saturn" to "Sega Saturn",
+    "segasaturn" to "Sega Saturn",
+)
+
+/** "PS2" -> "PlayStation 2" (nome da plataforma no IGDB); null se não conheço. */
+fun plataformaIgdb(texto: String?): String? =
+    if (texto.isNullOrBlank()) null else PLATAFORMAS_IGDB[chaveNome(texto)]
+
+/**
+ * Escolhe o jogo certo entre os resultados do IGDB. Com plataforma conhecida, só entram jogos lançados nela
+ * (assim "Resident Evil 4" do PS2 não vira o remake de 2023). [estrito] = nome igual, ou igual + subtítulo.
+ */
+fun escolherIgdb(nome: String, plataforma: String?, cands: List<CandIgdb>, estrito: Boolean = true): CandIgdb? {
+    val alvo = plataforma?.let { chaveNome(it) }
+    val pool = if (alvo == null) cands else cands.filter { c -> c.plataformas.any { chaveNome(it) == alvo } }
+    val k = melhorResultado(nome, pool.map { it.nome }, estrito)
+    return if (k >= 0) pool[k] else null
+}
+
+/** Data de lançamento (yyyy-MM-dd) na plataforma pedida; a mais antiga se houver várias regiões. */
+fun dataDaPlataforma(c: CandIgdb, plataforma: String?): String? {
+    val alvo = plataforma?.let { chaveNome(it) }
+    val segundos = if (alvo == null) c.primeira
+    else c.datas.filterKeys { chaveNome(it) == alvo }.values.minOrNull()
+    return segundos?.let { java.time.Instant.ofEpochSecond(it).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString() }
+}
+
+private val GENEROS_PT: Map<String, String> = mapOf(
+    "fighting" to "Luta", "shooter" to "Tiro", "music" to "Música", "platform" to "Plataforma", "puzzle" to "Puzzle",
+    "racing" to "Corrida", "realtimestrategyrts" to "Estratégia", "roleplayingrpg" to "RPG",
+    "simulator" to "Simulação", "sport" to "Esporte", "strategy" to "Estratégia",
+    "turnbasedstrategytbs" to "Estratégia por turnos", "tactical" to "Tática", "hackandslashbeatemup" to "Ação",
+    "quiztrivia" to "Quiz", "pinball" to "Pinball", "adventure" to "Aventura", "pointandclick" to "Point-and-click",
+    "visualnovel" to "Visual Novel", "cardboardgame" to "Cartas e tabuleiro", "moba" to "MOBA",
+)
+
+/** Primeiro gênero do IGDB que sei traduzir (ignora "Indie" e "Arcade", que dizem pouco). */
+fun generoPt(generos: List<String>): String? =
+    generos.firstNotNullOfOrNull { GENEROS_PT[chaveNome(it)] }

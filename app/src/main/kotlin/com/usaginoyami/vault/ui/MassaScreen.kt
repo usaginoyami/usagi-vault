@@ -16,6 +16,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -24,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -72,7 +74,7 @@ fun MassaScreen(vm: VaultViewModel) {
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text(
-                "Procura cada jogo na Steam pelo nome e preenche a capa e a data de lançamento. " +
+                "Procura cada jogo pelo nome (PC na Steam, console no IGDB) e preenche a capa e a data de lançamento. " +
                     "Hoje: $semCapa jogos sem capa e $semData sem data de lançamento.",
                 color = VaultColors.Muted,
                 fontSize = 13.sp,
@@ -91,9 +93,33 @@ fun MassaScreen(vm: VaultViewModel) {
                 o.lancamento, !rodando,
             ) { vm.massaOpcoes = o.copy(lancamento = it) }
             Opcao(
-                "Incluir jogos de console (PS1, PS2, GBA...)", "A capa da Steam é a do PC e pode não ser a do console.",
+                "Incluir jogos de console (PS1, PS2, GBA...)", "Usa o IGDB (capa de caixa e data na plataforma certa). Precisa das chaves abaixo.",
                 o.consoles, !rodando,
             ) { vm.massaOpcoes = o.copy(consoles = it) }
+            Opcao(
+                "Preencher o gênero dos consoles que estão sem", "Vem do IGDB e só entra onde o gênero está vazio.",
+                o.genero, !rodando && o.consoles,
+            ) { vm.massaOpcoes = o.copy(genero = it) }
+
+            if (o.consoles) {
+                Text("Chaves do IGDB (grátis)", color = VaultColors.Text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(
+                    "1) Entre em dev.twitch.tv/console com sua conta da Twitch (precisa de verificação em 2 etapas ligada).\n" +
+                        "2) Registre um aplicativo: URL de redirecionamento http://localhost, categoria Application Integration, tipo Confidential.\n" +
+                        "3) Copie o Client ID e gere o Client Secret. Ficam só neste celular.",
+                    color = VaultColors.Muted,
+                    fontSize = 12.sp,
+                )
+                OutlinedTextField(
+                    value = vm.igdbId, onValueChange = { vm.mudarIgdbId(it) }, enabled = !rodando,
+                    label = { Text("Client ID") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = vm.igdbSecret, onValueChange = { vm.mudarIgdbSecret(it) }, enabled = !rodando,
+                    label = { Text("Client Secret") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+                )
+            }
 
             if (!rodando) {
                 Text(
@@ -104,7 +130,7 @@ fun MassaScreen(vm: VaultViewModel) {
                 )
                 Button(
                     onClick = { vm.massaIniciar() },
-                    enabled = candidatos.isNotEmpty() && (o.capas || o.lancamento),
+                    enabled = candidatos.isNotEmpty() && (o.capas || o.lancamento || o.genero),
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Começar") }
             } else {
@@ -121,7 +147,7 @@ fun MassaScreen(vm: VaultViewModel) {
 
             if (vm.massaNaoAchados.isNotEmpty()) {
                 Text(
-                    "Não encontrei na Steam (abra o jogo e use \"Buscar na Steam\" ou escolha a capa na galeria):",
+                    "Não encontrei (abra o jogo e use a busca dele ou escolha a capa na galeria):",
                     color = VaultColors.Muted,
                     fontSize = 12.sp,
                 )

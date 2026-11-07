@@ -11,8 +11,10 @@ import java.net.URLEncoder
 
 open class ErroSteam(mensagem: String) : Exception(mensagem)
 
-/** A loja da Steam respondeu 429: pedindo para esperar. */
-class LimiteSteam : ErroSteam("A Steam pediu para esperar um pouco (limite de pedidos). Tente de novo em alguns minutos.")
+/** Uma API (Steam ou IGDB) respondeu 429: pedindo para esperar. */
+open class LimiteApi(mensagem: String) : ErroSteam(mensagem)
+
+class LimiteSteam : LimiteApi("A Steam pediu para esperar um pouco (limite de pedidos). Tente de novo em alguns minutos.")
 
 class SteamGame(val appid: Int, val nome: String, val horas: Double)
 

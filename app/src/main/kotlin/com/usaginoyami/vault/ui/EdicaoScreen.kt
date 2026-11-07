@@ -172,6 +172,11 @@ fun EdicaoScreen(vm: VaultViewModel) {
                     OutlinedButton(onClick = { vm.buscarCapaNaSteam() }, enabled = !f.buscandoCapa) {
                         Text(if (f.buscandoCapa) "Buscando..." else "Buscar na Steam")
                     }
+                    if (!com.usaginoyami.vault.logic.ehPlataformaPc(f.plataforma)) {
+                        OutlinedButton(onClick = { vm.buscarNoIgdb() }, enabled = !f.buscandoCapa) {
+                            Text(if (f.buscandoCapa) "Buscando..." else "Buscar no IGDB (console)")
+                        }
+                    }
                     TextButton(onClick = { vm.tirarCapa() }, enabled = f.capaExibida != null) { Text("Tirar capa") }
                 }
             }
